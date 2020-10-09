@@ -14,48 +14,51 @@
 
 #pragma once
 
-#include "RF24_config.h"
+#include <SpiDevice.h>
 
-#if defined(RF24_LINUX) || defined(LITTLEWIRE)
-#include "utility/includes.h"
-#elif defined SOFTSPI
-#include <DigitalIO.h>
-#endif
+//#include <stdint.h>
+#include <algorithm>
+using std::max;
+using std::min;
+
+//#ifdef SOFTSPI
+//#include <DigitalIO.h>
+//#endif
 
 /**
  * Power Amplifier level.
  *
  * For use with setPALevel()
  */
-typedef enum {
+enum rf24_pa_dbm_e {
 	RF24_PA_MIN = 0,
 	RF24_PA_LOW,
 	RF24_PA_HIGH,
 	RF24_PA_MAX,
 	RF24_PA_ERROR,
-} rf24_pa_dbm_e;
+};
 
 /**
  * Data rate.  How fast data moves through the air.
  *
  * For use with setDataRate()
  */
-typedef enum {
+enum rf24_datarate_e {
 	RF24_1MBPS = 0,
 	RF24_2MBPS,
 	RF24_250KBPS,
-} rf24_datarate_e;
+};
 
 /**
  * CRC Length.  How big (if any) of a CRC is included.
  *
  * For use with setCRCLength()
  */
-typedef enum {
+enum rf24_crclength_e {
 	RF24_CRC_DISABLED = 0,
 	RF24_CRC_8,
 	RF24_CRC_16,
-} rf24_crclength_e;
+};
 
 /**
  * Driver for nRF24L01(+) 2.4GHz Wireless Transceiver
@@ -74,33 +77,13 @@ public:
 	/**
      * RF24 Constructor
      *
-     * Creates a new instance of this driver.  Before using, you create an instance
-     * and send in the unique pins that this chip is connected to.
-     *
      * See http://tmrh20.github.io/RF24/pages.html for device specific information <br>
      *
-     * @note Users can specify default SPI speed by modifying `#define RF24_SPI_SPEED` in RF24_config.h <br>
-     * For Arduino, SPI speed will only be properly configured this way on devices supporting SPI TRANSACTIONS <br>
-     * Older/Unsupported Arduino devices will use a default clock divider & settings configuration <br>
-     * Linux: The old way of setting SPI speeds using BCM2835 driver enums has been removed <br>
-     *
-     * @param _cepin The pin attached to Chip Enable on the RF module
-     * @param _cspin The pin attached to Chip Select
-     * @param _spispeed The SPI speed in Hz ie: 1000000 == 1Mhz
+     * @param cePin The pin attached to Chip Enable on the RF module
+     * @param spi
+     * @param spiSpeed The SPI speed in Hz ie: 1000000 == 1Mhz
      */
-	RF24(uint16_t _cepin, uint16_t _cspin, uint32_t _spispeed = RF24_SPI_SPEED);
-
-#if defined(RF24_LINUX)
-	virtual ~RF24(){};
-#endif
-
-	/**
-     * Begin operation of the chip
-     *
-     * Call this in setup(), before calling any other methods.
-     * @code radio.begin() @endcode
-     */
-	bool begin();
+	bool begin(uint16_t cepin, SpiMaster* spi, uint32_t spispeed);
 
 	/**
      * Checks if the chip is connected to the SPI bus
@@ -647,7 +630,7 @@ public:
      */
 	bool isValid()
 	{
-		return ce_pin != 0xff && csn_pin != 0xff;
+		return ce_pin != 0xff;
 	}
 
 	/**
@@ -686,9 +669,14 @@ public:
     *  }
     * @endcode
     */
-	//#if defined (FAILURE_HANDLING)
-	bool failureDetected;
-	//#endif
+	bool failureDetected() const
+	{
+#ifdef FAILURE_HANDLING
+		return failureFlag;
+#else
+		return false;
+#endif
+	}
 
 	/**@}*/
 	/**
@@ -745,7 +733,7 @@ public:
      */
 	void setPayloadSize(uint8_t size)
 	{
-		payload_size = rf24_min(size, 32);
+		payload_size = min(size, uint8_t(32));
 	}
 
 	/**
@@ -949,31 +937,6 @@ public:
 	void maskIRQ(bool tx_ok, bool tx_fail, bool rx_ready);
 
 	/**
-    *
-    * The driver will delay for this duration when stopListening() is called
-    *
-    * When responding to payloads, faster devices like ARM(RPi) are much faster than Arduino:
-    * 1. Arduino sends data to RPi, switches to RX mode
-    * 2. The RPi receives the data, switches to TX mode and sends before the Arduino radio is in RX mode
-    * 3. If AutoACK is disabled, this can be set as low as 0. If AA/ESB enabled, set to 100uS minimum on RPi
-    *
-    * @warning If set to 0, ensure 130uS delay after stopListening() and before any sends
-    */
-
-	uint32_t txDelay;
-
-	/**
-    *
-    * On all devices but Linux and ATTiny, a small delay is added to the CSN toggling function
-    *
-    * This is intended to minimise the speed of SPI polling due to radio commands
-    *
-    * If using interrupts or timed requests, this can be set to 0 Default:5
-    */
-
-	uint32_t csDelay;
-
-	/**
      * Transmission of constant carrier wave with defined frequency and output power
      * 
      * @param level Output power to use
@@ -1046,18 +1009,6 @@ private:
 	/**@{*/
 
 	/**
-     * Set chip select pin
-     *
-     * Running SPI bus at PI_CLOCK_DIV2 so we don't waste time transferring data
-     * and best of all, we make use of the radio's FIFO buffers. A lower speed
-     * means we're less likely to effectively leverage our FIFOs and pay a higher
-     * AVR runtime cost as toll.
-     *
-     * @param mode HIGH to take this unit off the SPI bus, LOW to put it on
-     */
-	void csn(bool mode);
-
-	/**
      * Set chip enable
      *
      * @param level HIGH to actively begin transmission or LOW to put in standby.  Please see data sheet
@@ -1091,7 +1042,7 @@ private:
      * @param len How many bytes of data to transfer
      * @return Current value of status register
      */
-	uint8_t write_register(uint8_t reg, const uint8_t* buf, uint8_t len);
+	uint8_t write_register(uint8_t reg, const void* buf, uint8_t len);
 
 	/**
      * Write a single byte to a register
@@ -1201,42 +1152,30 @@ private:
 
 	/**@}*/
 
-protected:
-	/**
-     * SPI transactions
-     *
-     * Common code for SPI transactions including CSN toggle
-     *
-     */
-	inline void beginTransaction();
-
-	inline void endTransaction();
-
 private:
-#ifdef SOFTSPI
-	SoftSPI<SOFT_SPI_MISO_PIN, SOFT_SPI_MOSI_PIN, SOFT_SPI_SCK_PIN, SPI_MODE> spi;
-#elif defined(SPI_UART)
-	SPIUARTClass uspi;
-#endif
+	/**
+    *
+    * The driver will delay for this duration when stopListening() is called
+    *
+    * When responding to payloads, faster devices like ARM(RPi) are much faster than Arduino:
+    * 1. Arduino sends data to RPi, switches to RX mode
+    * 2. The RPi receives the data, switches to TX mode and sends before the Arduino radio is in RX mode
+    * 3. If AutoACK is disabled, this can be set as low as 0. If AA/ESB enabled, set to 100uS minimum on RPi
+    *
+    * @warning If set to 0, ensure 130uS delay after stopListening() and before any sends
+    */
 
-#if defined(RF24_LINUX) || defined(XMEGA_D3) /* XMEGA can use SPI class */
-	SPI spi;
-#endif
-#if defined(MRAA)
-	GPIO gpio;
-#endif
+	uint32_t txDelay{0};
 
-	uint16_t ce_pin;	/**< "Chip Enable" pin, activates the RX or TX role */
-	uint16_t csn_pin;   /**< SPI Chip select */
-	uint32_t spi_speed; /**< SPI Bus Speed */
-#if defined(RF24_LINUX) || defined(XMEGA_D3)
-	uint8_t spi_rxbuff[32 + 1]; //SPI receive buffer (payload max 32 bytes)
-	uint8_t spi_txbuff[32 + 1]; //SPI transmit buffer (payload max 32 bytes + 1 byte for the command)
-#endif
-	uint8_t payload_size;			  /**< Fixed size of payloads */
-	bool dynamic_payloads_enabled;	/**< Whether dynamic payloads are enabled. */
-	bool ack_payloads_enabled;		  /**< Whether ack payloads are enabled. */
+	SpiDevice spidev;
+	SpiPacket packet;
+	uint8_t outbuf[33];
+	uint8_t inbuf[33];
+	uint16_t ce_pin{0};				  /**< "Chip Enable" pin, activates the RX or TX role */
+	uint8_t payload_size{32};			  /**< Fixed size of payloads */
+	bool dynamic_payloads_enabled{false};	/**< Whether dynamic payloads are enabled. */
+	bool ack_payloads_enabled{false};		  /**< Whether ack payloads are enabled. */
 	uint8_t pipe0_reading_address[5]; /**< Last address set on pipe 0 for reading. */
-	uint8_t addr_width;				  /**< The address width to use - 3,4 or 5 bytes. */
+	uint8_t addr_width{5};				  /**< The address width to use - 3,4 or 5 bytes. */
 	uint8_t config_reg;				  /**< For storing the value of the NRF_CONFIG register */
 };
