@@ -60,6 +60,7 @@ enum rf24_crclength_e {
 class RF24
 {
 public:
+	static constexpr uint32_t SPI_SPEED{8000000U};
 	static constexpr uint8_t FIFO_SIZE{32};
 	static constexpr uint8_t TIMEOUT_MS{95};
 
@@ -71,15 +72,31 @@ public:
 	/**@{*/
 
 	/**
-     * Initialize RF24 driver
+     * RF24 Constructor
      *
-     * See http://tmrh20.github.io/RF24/pages.html for device specific information
+     * Creates a new instance of this driver.  Before using, you create an instance
+     * and send in the unique pins that this chip is connected to.
      *
-     * @param cepin The pin attached to Chip Enable on the RF module, -1 if tied high
-     * @param spi
+     * See http://tmrh20.github.io/RF24/pages.html for device specific information <br>
+     *
+     * @note Users can specify default SPI speed by modifying `#define RF24_SPI_SPEED` in RF24_config.h <br>
+     * For Arduino, SPI speed will only be properly configured this way on devices supporting SPI TRANSACTIONS <br>
+     * Older/Unsupported Arduino devices will use a default clock divider & settings configuration <br>
+     * Linux: The old way of setting SPI speeds using BCM2835 driver enums has been removed <br>
+     *
+     * @param spi SPI controller to use
      * @param spiSpeed The SPI speed in Hz ie: 1000000 == 1Mhz
+     * @param cepin The pin attached to Chip Enable on the RF module, -1 if tied high
      */
-	bool begin(int8_t cepin, SpiMaster* spi, uint32_t spiSpeed);
+	RF24(SpiMaster& spi, uint32_t spiSpeed = SPI_SPEED, uint16_t _cepin = -1);
+
+	/**
+     * Begin operation of the chip
+     *
+     * Call this in setup(), before calling any other methods.
+     * @code radio.begin() @endcode
+     */
+	bool begin();
 
 	/**
      * Checks if the chip is connected to the SPI bus
