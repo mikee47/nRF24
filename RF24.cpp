@@ -12,20 +12,14 @@
 #include <BitManipulations.h>
 #include <Data/CStringArray.h>
 #include <Clock.h>
-
-void RF24::ce(bool level)
-{
-	if(ce_pin != 0) {
-		digitalWrite(ce_pin, level);
-	}
-}
+#include <Platform/Timers.h>
 
 uint8_t RF24::read_register(uint8_t reg, uint8_t* buf, uint8_t len)
 {
 	packet.prepare();
 	packet.out.set8(R_REGISTER | (REGISTER_MASK & reg));
-	memset(inbuf, 0, sizeof(inbuf));
 	assert(len < sizeof(inbuf));
+	memset(inbuf, 0, sizeof(inbuf));
 	packet.in.set(inbuf, 1 + len);
 	spidev.execute(packet);
 	if(len != 0) {
@@ -38,9 +32,9 @@ uint8_t RF24::read_register(uint8_t reg)
 {
 	packet.prepare();
 	packet.out.set8(R_REGISTER | (REGISTER_MASK & reg));
-	packet.in.set(inbuf, 2);
+	packet.in.set16(0);
 	spidev.execute(packet);
-	return inbuf[1];
+	return packet.in.data[1];
 }
 
 uint8_t RF24::write_register(uint8_t reg, const void* buf, uint8_t len)
@@ -60,9 +54,7 @@ uint8_t RF24::write_register(uint8_t reg, uint8_t value)
 	debug_i("write_register(%02x,%02x)", reg, value);
 
 	packet.prepare();
-	outbuf[0] = W_REGISTER | (REGISTER_MASK & reg);
-	outbuf[1] = value;
-	packet.out.set(outbuf, 2);
+	packet.out.set16((value << 8) | W_REGISTER | (REGISTER_MASK & reg));
 	packet.in.set8(0);
 	spidev.execute(packet);
 	return packet.in.data8;
@@ -70,16 +62,15 @@ uint8_t RF24::write_register(uint8_t reg, uint8_t value)
 
 uint8_t RF24::write_payload(const void* buf, uint8_t data_len, uint8_t writeType)
 {
-	data_len = min(data_len, payload_size);
+	data_len = std::min(data_len, payload_size);
 	uint8_t blank_len = dynamic_payloads_enabled ? 0 : payload_size - data_len;
 
 	debug_i("[Writing %u bytes %u blanks]", data_len, blank_len);
 
 	packet.prepare();
-	memset(outbuf, 0, sizeof(outbuf));
 	outbuf[0] = writeType;
-	assert(data_len + blank_len < sizeof(outbuf));
 	memcpy(&outbuf[1], buf, data_len);
+	memset(&outbuf[1 + data_len], 0, blank_len);
 	packet.out.set(outbuf, 1 + data_len + blank_len);
 	packet.in.set8(0);
 	spidev.execute(packet);
@@ -88,9 +79,7 @@ uint8_t RF24::write_payload(const void* buf, uint8_t data_len, uint8_t writeType
 
 uint8_t RF24::read_payload(void* buf, uint8_t data_len)
 {
-	if(data_len > payload_size) {
-		data_len = payload_size;
-	}
+	data_len = std::min(data_len, payload_size);
 	uint8_t blank_len = dynamic_payloads_enabled ? 0 : payload_size - data_len;
 
 	debug_i("[Reading %u bytes %u blanks]", data_len, blank_len);
@@ -98,7 +87,6 @@ uint8_t RF24::read_payload(void* buf, uint8_t data_len)
 	packet.prepare();
 	packet.out.set8(R_RX_PAYLOAD);
 	memset(inbuf, 0, sizeof(inbuf));
-	assert(data_len + blank_len < sizeof(inbuf));
 	packet.in.set(inbuf, 1 + data_len + blank_len);
 	spidev.execute(packet);
 	memcpy(buf, &inbuf[1], data_len);
@@ -129,7 +117,7 @@ uint8_t RF24::get_status()
 	return spiTrans(RF24_NOP);
 }
 
-#if !defined(MINIMAL)
+#ifndef RF24_MINIMAL
 
 void RF24::print_status(uint8_t status)
 {
@@ -159,10 +147,10 @@ void RF24::print_address_register(const char* name, uint8_t reg, uint8_t qty)
 
 	while(qty--) {
 		uint8_t buffer[addr_width];
-		read_register(reg++, buffer, sizeof buffer);
+		read_register(reg++, buffer, addr_width);
 
 		m_puts(_F(" 0x"));
-		uint8_t* bufptr = buffer + sizeof buffer;
+		auto bufptr = buffer + addr_width;
 		while(--bufptr >= buffer) {
 			m_printf(_F("%02x"), *bufptr);
 		}
@@ -171,24 +159,9 @@ void RF24::print_address_register(const char* name, uint8_t reg, uint8_t qty)
 	m_puts("\r\n");
 }
 
-#endif
-
-void RF24::setChannel(uint8_t channel)
-{
-	const uint8_t max_channel = 125;
-	write_register(RF_CH, min(channel, max_channel));
-}
-
-uint8_t RF24::getChannel()
-{
-	return read_register(RF_CH);
-}
-
-#if !defined(MINIMAL)
-
 void RF24::printDetails()
 {
-	m_printf(_F("SPI Speedz\t = %u MHz\n"), spidev.getSpeed() / 1000000U);
+	m_printf(_F("SPI Speed\t = %u MHz\n"), spidev.getSpeed() / 1000000U);
 
 	print_status(get_status());
 
@@ -204,42 +177,45 @@ void RF24::printDetails()
 	print_byte_register(_F("CONFIG\t"), NRF_CONFIG);
 	print_byte_register(_F("DYNPD/FEATURE"), DYNPD, 2);
 
-	CStringArray dataRateStrings("1MBPS\0"
-								 "2MBPS\0"
-								 "250KBPS\0");
+	CStringArray dataRateStrings(F("1MBPS\0"
+								   "2MBPS\0"
+								   "250KBPS\0"));
 	m_printf(_F("Data Rate\t = %s\r\n"), dataRateStrings[getDataRate()]);
 
 	m_printf(_F("Model\t\t = nRF24L01%c\r\n"), isPVariant() ? '+' : ' ');
 
-	CStringArray crcLengthStrings("Disabled\0"
-								  "8 bits\0"
-								  "16 bits\0");
+	CStringArray crcLengthStrings(F("Disabled\0"
+									"8 bits\0"
+									"16 bits\0"));
 	m_printf(_F("CRC Length\t = %s\r\n"), crcLengthStrings[getCRCLength()]);
 
-	CStringArray powerStrings("MIN\0"
-							  "LOW\0"
-							  "HIGH\0"
-							  "MAX\0");
+	CStringArray powerStrings(F("MIN\0"
+								"LOW\0"
+								"HIGH\0"
+								"MAX\0"));
 	m_printf(_F("PA Power\t = PA_%s\r\n"), powerStrings[getPALevel()]);
 }
 
-#endif // !defined(MINIMAL)
+#endif // RF24_MINIMAL
 
-bool RF24::begin(uint16_t cepin, SpiMaster* spi, uint32_t spiSpeed)
+bool RF24::begin(int8_t cepin, SpiMaster* spi, uint32_t spiSpeed)
 {
 	ce_pin = cepin;
 
 	pipe0_reading_address[0] = 0;
 
 	// Initialize pins
-	if(ce_pin != 0) {
+	if(ce_pin >= 0) {
 		pinMode(ce_pin, OUTPUT);
+		ce(LOW);
 	}
-	ce(LOW);
 	spidev.begin(spi);
 	spidev.setBitOrder(MSBFIRST);
 	spidev.setMode(SPI_MODE0);
-	spidev.setClockSpeed(8000000U);
+	spidev.setSpeed(spiSpeed);
+	packet.duplex = true;
+
+	debug_i("spiSpeed = %u, set = %u, clockReg = 0x%08x", spiSpeed, spidev.getSpeed(), spidev.getClockReg());
 
 	// Must allow the radio time to settle else configuration bits will not necessarily stick.
 	// This is actually only required following power up but some settling time also appears to
@@ -334,20 +310,12 @@ void RF24::stopListening()
 	delayMicroseconds(txDelay);
 
 	if(read_register(FEATURE) & _BV(EN_ACK_PAY)) {
-		delayMicroseconds(txDelay); // 200
+		delayMicroseconds(txDelay);
 		flush_tx();
 	}
-	// flush_rx();
 	config_reg &= ~_BV(PRIM_RX);
 	write_register(NRF_CONFIG, read_register(NRF_CONFIG) & ~_BV(PRIM_RX));
 
-#if defined(RF24_TINY) || defined(LITTLEWIRE)
-	// for 3 pins solution TX mode is only left with additonal powerDown/powerUp cycle
-	if(ce_pin == csn_pin) {
-		powerDown();
-		powerUp();
-	}
-#endif
 	// Enable RX on pipe0
 	write_register(EN_RXADDR, read_register(EN_RXADDR) | _BV(child_pipe_enable(0)));
 
@@ -376,23 +344,30 @@ void RF24::powerUp()
 	}
 }
 
-/******************************************************************/
-#if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
+#if defined(RF24_FAILURE_HANDLING)
 
 void RF24::errNotify()
 {
-#if defined(SERIAL_DEBUG)
-	m_puts(_F("RF24 HARDWARE FAIL: Radio not responding, verify pin connections, wiring, etc.\r\n"));
-#endif
-#if defined(FAILURE_HANDLING)
-	failureDetected = 1;
+	debug_e("RF24 HARDWARE FAIL: Radio not responding, verify pin connections, wiring, etc.");
+#if defined(RF24_FAILURE_HANDLING)
+	failureFlag = true;
 #else
 	delay(5000);
 #endif
 }
 
 #endif
-/******************************************************************/
+
+void RF24::setChannel(uint8_t channel)
+{
+	const uint8_t max_channel = 125;
+	write_register(RF_CH, std::min(channel, max_channel));
+}
+
+uint8_t RF24::getChannel()
+{
+	return read_register(RF_CH);
+}
 
 // Similar to the previous write, clears the interrupt flags
 bool RF24::write(const void* buf, uint8_t len, bool multicast)
@@ -401,13 +376,13 @@ bool RF24::write(const void* buf, uint8_t len, bool multicast)
 	startFastWrite(buf, len, multicast);
 
 // Wait until complete or failed
-#if defined(FAILURE_HANDLING)
-	uint32_t timer = millis();
-#endif // defined(FAILURE_HANDLING)
+#if defined(RF24_FAILURE_HANDLING)
+	OneShotFastMs timer(TIMEOUT_MS);
+#endif
 
 	while(!(get_status() & (_BV(TX_DS) | _BV(MAX_RT)))) {
-#if defined(FAILURE_HANDLING)
-		if(millis() - timer > 95) {
+#if defined(RF24_FAILURE_HANDLING)
+		if(timer.expired()) {
 			errNotify();
 			return false;
 		}
@@ -435,20 +410,19 @@ bool RF24::writeBlocking(const void* buf, uint8_t len, uint32_t timeout)
 	// This way the FIFO will fill up and allow blocking until packets go through
 	// The radio will auto-clear everything in the FIFO as long as CE remains high
 
-	uint32_t timer = millis(); // Get the time that the payload transmission started
+	OneShotFastMs timer(timeout);
 
 	// Blocking only if FIFO is full. This will loop and block until TX is successful or timeout
 	while((get_status() & (_BV(TX_FULL)))) {
 		if(get_status() & _BV(MAX_RT)) {
 			// MAX Retries have been reached: set re-transmit and clear the MAX_RT interrupt flag
 			reUseTX();
-			if(millis() - timer > timeout) {
-				// Payload has exceeded the user-defined timeout
+			if(timer.expired()) {
 				return false;
 			}
 		}
-#if defined(FAILURE_HANDLING)
-		if(millis() - timer > (timeout + 95)) {
+#if defined(RF24_FAILURE_HANDLING)
+		if(timer.elapsedTicks() > timer.checkTime<TIMEOUT_MS>()) {
 			errNotify();
 			return false;
 		}
@@ -476,8 +450,8 @@ bool RF24::writeFast(const void* buf, uint8_t len, bool multicast)
 	// Return 0 so the user can control the retrys and set a timer or failure counter if required
 	// The radio will auto-clear everything in the FIFO as long as CE remains high
 
-#if defined(FAILURE_HANDLING)
-	uint32_t timer = millis();
+#if defined(RF24_FAILURE_HANDLING)
+	OneShotFastMs timer(TIMEOUT_MS);
 #endif
 
 	// Blocking only if FIFO is full. This will loop and block until TX is successful or fail
@@ -487,8 +461,8 @@ bool RF24::writeFast(const void* buf, uint8_t len, bool multicast)
 			// From the user perspective, if you get false just keep trying to send the same payload
 			return false;
 		}
-#if defined(FAILURE_HANDLING)
-		if(millis() - timer > 95) {
+#if defined(RF24_FAILURE_HANDLING)
+		if(timer.expired()) {
 			errNotify();
 			return false;
 		}
@@ -513,7 +487,6 @@ bool RF24::writeFast(const void* buf, uint8_t len)
 void RF24::startFastWrite(const void* buf, uint8_t len, bool multicast, bool startTx)
 { // TMRh20
 
-	// write_payload( buf,len);
 	write_payload(buf, len, multicast ? W_TX_PAYLOAD_NO_ACK : W_TX_PAYLOAD);
 	if(startTx) {
 		ce(HIGH);
@@ -524,15 +497,14 @@ void RF24::startFastWrite(const void* buf, uint8_t len, bool multicast, bool sta
 // Allows the library to pass all tests
 void RF24::startWrite(const void* buf, uint8_t len, bool multicast)
 {
-	// Send the payload
-
-	// write_payload( buf, len );
 	write_payload(buf, len, multicast ? W_TX_PAYLOAD_NO_ACK : W_TX_PAYLOAD);
-	ce(HIGH);
+	if(ce_pin >= 0) {
+		ce(HIGH);
 #if !defined(F_CPU) || F_CPU > 20000000
-	delayMicroseconds(10);
+		delayMicroseconds(10);
 #endif
-	ce(LOW);
+		ce(LOW);
+	}
 }
 
 bool RF24::rxFifoFull()
@@ -542,9 +514,10 @@ bool RF24::rxFifoFull()
 
 bool RF24::txStandBy()
 {
-#if defined(FAILURE_HANDLING)
-	uint32_t timeout = millis();
+#if defined(RF24_FAILURE_HANDLING)
+	OneShotFastMs timer(TIMEOUT_MS);
 #endif
+
 	while(!(read_register(FIFO_STATUS) & _BV(TX_EMPTY))) {
 		if(get_status() & _BV(MAX_RT)) {
 			write_register(NRF_STATUS, _BV(MAX_RT));
@@ -552,8 +525,8 @@ bool RF24::txStandBy()
 			flush_tx(); // Non blocking, flush the data
 			return 0;
 		}
-#if defined(FAILURE_HANDLING)
-		if(millis() - timeout > 95) {
+#if defined(RF24_FAILURE_HANDLING)
+		if(timer.expired()) {
 			errNotify();
 			return false;
 		}
@@ -570,21 +543,22 @@ bool RF24::txStandBy(uint32_t timeout, bool startTx)
 		stopListening();
 		ce(HIGH);
 	}
-	uint32_t start = millis();
+
+	OneShotFastMs timer(timeout);
 
 	while(!(read_register(FIFO_STATUS) & _BV(TX_EMPTY))) {
 		if(get_status() & _BV(MAX_RT)) {
 			write_register(NRF_STATUS, _BV(MAX_RT));
 			ce(LOW); // Set re-transmit
 			ce(HIGH);
-			if(millis() - start >= timeout) {
+			if(timer.expired()) {
 				ce(LOW);
 				flush_tx();
 				return false;
 			}
 		}
-#if defined(FAILURE_HANDLING)
-		if(millis() - start > (timeout + 95)) {
+#if defined(RF24_FAILURE_HANDLING)
+		if(timer.elapsedTicks() > timer.checkTime<TIMEOUT_MS>()) {
 			errNotify();
 			return false;
 		}
@@ -833,7 +807,7 @@ void RF24::enableDynamicAck()
 
 void RF24::writeAckPayload(uint8_t pipe, const void* buf, uint8_t len)
 {
-	uint8_t data_len = min(len, uint8_t(32));
+	uint8_t data_len = std::min(len, uint8_t(32));
 
 	packet.prepare();
 	outbuf[0] = W_ACK_PAYLOAD | (pipe & 0x07);

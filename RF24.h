@@ -15,15 +15,8 @@
 #pragma once
 
 #include <SpiDevice.h>
-
-//#include <stdint.h>
+#include <Digital.h>
 #include <algorithm>
-using std::max;
-using std::min;
-
-//#ifdef SOFTSPI
-//#include <DigitalIO.h>
-//#endif
 
 /**
  * Power Amplifier level.
@@ -67,6 +60,9 @@ enum rf24_crclength_e {
 class RF24
 {
 public:
+	static constexpr uint8_t FIFO_SIZE{32};
+	static constexpr uint8_t TIMEOUT_MS{95};
+
 	/**
      * @name Primary public interface
      *
@@ -75,15 +71,15 @@ public:
 	/**@{*/
 
 	/**
-     * RF24 Constructor
+     * Initialize RF24 driver
      *
-     * See http://tmrh20.github.io/RF24/pages.html for device specific information <br>
+     * See http://tmrh20.github.io/RF24/pages.html for device specific information
      *
-     * @param cePin The pin attached to Chip Enable on the RF module
+     * @param cepin The pin attached to Chip Enable on the RF module, -1 if tied high
      * @param spi
      * @param spiSpeed The SPI speed in Hz ie: 1000000 == 1Mhz
      */
-	bool begin(uint16_t cepin, SpiMaster* spi, uint32_t spispeed);
+	bool begin(int8_t cepin, SpiMaster* spi, uint32_t spiSpeed);
 
 	/**
      * Checks if the chip is connected to the SPI bus
@@ -630,7 +626,7 @@ public:
      */
 	bool isValid()
 	{
-		return ce_pin != 0xff;
+		return ce_pin >= 0;
 	}
 
 	/**
@@ -671,7 +667,7 @@ public:
     */
 	bool failureDetected() const
 	{
-#ifdef FAILURE_HANDLING
+#ifdef RF24_FAILURE_HANDLING
 		return failureFlag;
 #else
 		return false;
@@ -733,7 +729,7 @@ public:
      */
 	void setPayloadSize(uint8_t size)
 	{
-		payload_size = min(size, uint8_t(32));
+		payload_size = std::min(size, FIFO_SIZE);
 	}
 
 	/**
@@ -1014,7 +1010,12 @@ private:
      * @param level HIGH to actively begin transmission or LOW to put in standby.  Please see data sheet
      * for a much more detailed description of this pin.
      */
-	void ce(bool level);
+	void ce(bool level)
+	{
+		if(ce_pin >= 0) {
+			digitalWrite(ce_pin, level);
+		}
+	}
 
 	/**
      * Read a chunk of data in from a register
@@ -1082,7 +1083,7 @@ private:
      */
 	uint8_t get_status();
 
-#if !defined(MINIMAL)
+#ifndef RF24_MINIMAL
 
 	/**
      * Decode and print the given status to stdout
@@ -1144,7 +1145,7 @@ private:
 
 	uint8_t spiTrans(uint8_t cmd);
 
-#if defined(FAILURE_HANDLING) || defined(RF24_LINUX)
+#ifdef RF24_FAILURE_HANDLING
 
 	void errNotify();
 
@@ -1164,18 +1165,17 @@ private:
     *
     * @warning If set to 0, ensure 130uS delay after stopListening() and before any sends
     */
-
 	uint32_t txDelay{0};
 
 	SpiDevice spidev;
 	SpiPacket packet;
-	uint8_t outbuf[33];
-	uint8_t inbuf[33];
-	uint16_t ce_pin{0};				  /**< "Chip Enable" pin, activates the RX or TX role */
-	uint8_t payload_size{32};			  /**< Fixed size of payloads */
-	bool dynamic_payloads_enabled{false};	/**< Whether dynamic payloads are enabled. */
-	bool ack_payloads_enabled{false};		  /**< Whether ack payloads are enabled. */
-	uint8_t pipe0_reading_address[5]; /**< Last address set on pipe 0 for reading. */
-	uint8_t addr_width{5};				  /**< The address width to use - 3,4 or 5 bytes. */
-	uint8_t config_reg;				  /**< For storing the value of the NRF_CONFIG register */
+	uint8_t outbuf[1 + FIFO_SIZE];		  ///< +1 byte for command
+	uint8_t inbuf[1 + FIFO_SIZE];		  ///< +1 byte for status
+	int8_t ce_pin{-1};					  ///< "Chip Enable" pin, activates the RX or TX role
+	uint8_t payload_size{FIFO_SIZE};	  ///< Fixed size of payloads
+	bool dynamic_payloads_enabled{false}; ///< Whether dynamic payloads are enabled
+	bool ack_payloads_enabled{false};	 ///< Whether ack payloads are enabled
+	uint8_t pipe0_reading_address[5];	 ///< Last address set on pipe 0 for reading
+	uint8_t addr_width{5};				  ///< The address width to use - 3,4 or 5 bytes
+	uint8_t config_reg{0};				  ///< For storing the value of the NRF_CONFIG register
 };
