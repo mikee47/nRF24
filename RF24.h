@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include <SpiDevice.h>
+#include <HSPI/Device.h>
 #include <Digital.h>
 #include <algorithm>
 
@@ -88,7 +88,7 @@ public:
      * @param spiSpeed The SPI speed in Hz ie: 1000000 == 1Mhz
      * @param cepin The pin attached to Chip Enable on the RF module, -1 if tied high
      */
-	RF24(SpiMaster& spi, uint32_t spiSpeed = SPI_SPEED, uint16_t _cepin = -1);
+	RF24(HSPI::Controller& spi, uint32_t spiSpeed = SPI_SPEED, uint16_t _cepin = -1);
 
 	/**
      * Begin operation of the chip
@@ -1184,8 +1184,8 @@ private:
     */
 	uint32_t txDelay{0};
 
-	SpiDevice spidev;
-	SpiPacket packet;
+	HSPI::Device spidev;
+	HSPI::Packet packet;
 	uint8_t outbuf[1 + FIFO_SIZE];		  ///< +1 byte for command
 	uint8_t inbuf[1 + FIFO_SIZE];		  ///< +1 byte for status
 	int8_t ce_pin{-1};					  ///< "Chip Enable" pin, activates the RX or TX role

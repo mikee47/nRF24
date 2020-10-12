@@ -51,7 +51,7 @@ uint8_t RF24::write_register(uint8_t reg, const void* buf, uint8_t len)
 
 uint8_t RF24::write_register(uint8_t reg, uint8_t value)
 {
-//	debug_i("write_register(%02x,%02x)", reg, value);
+	//	debug_i("write_register(%02x,%02x)", reg, value);
 
 	packet.prepare();
 	packet.out.set16((value << 8) | W_REGISTER | (REGISTER_MASK & reg));
@@ -65,7 +65,7 @@ uint8_t RF24::write_payload(const void* buf, uint8_t data_len, uint8_t writeType
 	data_len = std::min(data_len, payload_size);
 	uint8_t blank_len = dynamic_payloads_enabled ? 0 : payload_size - data_len;
 
-//	debug_i("[Writing %u bytes %u blanks]", data_len, blank_len);
+	//	debug_i("[Writing %u bytes %u blanks]", data_len, blank_len);
 
 	packet.prepare();
 	outbuf[0] = writeType;
@@ -82,7 +82,7 @@ uint8_t RF24::read_payload(void* buf, uint8_t data_len)
 	data_len = std::min(data_len, payload_size);
 	uint8_t blank_len = dynamic_payloads_enabled ? 0 : payload_size - data_len;
 
-//	debug_i("[Reading %u bytes %u blanks]", data_len, blank_len);
+	//	debug_i("[Reading %u bytes %u blanks]", data_len, blank_len);
 
 	packet.prepare();
 	packet.out.set8(R_RX_PAYLOAD);
@@ -198,13 +198,13 @@ void RF24::printDetails()
 
 #endif // RF24_MINIMAL
 
-RF24::RF24(SpiMaster& spi, uint32_t spiSpeed, uint16_t cepin) : ce_pin(cepin)
+RF24::RF24(HSPI::Controller& spi, uint32_t spiSpeed, uint16_t cepin) : ce_pin(cepin)
 {
 	pipe0_reading_address[0] = 0;
 
 	spidev.begin(&spi);
 	spidev.setBitOrder(MSBFIRST);
-	spidev.setMode(SPI_MODE0);
+	spidev.setMode(HSPI::Mode0);
 	spidev.setSpeed(spiSpeed);
 	packet.duplex = true;
 }
@@ -217,7 +217,7 @@ bool RF24::begin()
 		ce(LOW);
 	}
 
-//	debug_i("spiSpeed = %u, clockReg = 0x%08x", spidev.getSpeed(), spidev.getClockReg());
+	//	debug_i("spiSpeed = %u, clockReg = 0x%08x", spidev.getSpeed(), spidev.getClockReg());
 
 	// Must allow the radio time to settle else configuration bits will not necessarily stick.
 	// This is actually only required following power up but some settling time also appears to
