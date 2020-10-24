@@ -16,12 +16,12 @@
 
 uint8_t RF24::read_register(uint8_t reg, uint8_t* buf, uint8_t len)
 {
-	packet.prepare();
-	packet.out.set8(R_REGISTER | (REGISTER_MASK & reg));
+	request.prepare();
+	request.out.set8(R_REGISTER | (REGISTER_MASK & reg));
 	assert(len < sizeof(inbuf));
 	memset(inbuf, 0, sizeof(inbuf));
-	packet.in.set(inbuf, 1 + len);
-	spidev.execute(packet);
+	request.in.set(inbuf, 1 + len);
+	execute(request);
 	if(len != 0) {
 		memcpy(buf, &inbuf[1], len);
 	}
@@ -30,34 +30,34 @@ uint8_t RF24::read_register(uint8_t reg, uint8_t* buf, uint8_t len)
 
 uint8_t RF24::read_register(uint8_t reg)
 {
-	packet.prepare();
-	packet.out.set8(R_REGISTER | (REGISTER_MASK & reg));
-	packet.in.set16(0);
-	spidev.execute(packet);
-	return packet.in.data[1];
+	request.prepare();
+	request.out.set8(R_REGISTER | (REGISTER_MASK & reg));
+	request.in.set16(0);
+	execute(request);
+	return request.in.data[1];
 }
 
 uint8_t RF24::write_register(uint8_t reg, const void* buf, uint8_t len)
 {
-	packet.prepare();
+	request.prepare();
 	outbuf[0] = W_REGISTER | (REGISTER_MASK & reg);
 	assert(len < sizeof(outbuf));
 	memcpy(&outbuf[1], buf, len);
-	packet.out.set(outbuf, 1 + len);
-	packet.in.set8(0);
-	spidev.execute(packet);
-	return packet.in.data8;
+	request.out.set(outbuf, 1 + len);
+	request.in.set8(0);
+	execute(request);
+	return request.in.data8;
 }
 
 uint8_t RF24::write_register(uint8_t reg, uint8_t value)
 {
 	//	debug_i("write_register(%02x,%02x)", reg, value);
 
-	packet.prepare();
-	packet.out.set16((value << 8) | W_REGISTER | (REGISTER_MASK & reg));
-	packet.in.set8(0);
-	spidev.execute(packet);
-	return packet.in.data8;
+	request.prepare();
+	request.out.set16((value << 8) | W_REGISTER | (REGISTER_MASK & reg));
+	request.in.set8(0);
+	execute(request);
+	return request.in.data8;
 }
 
 uint8_t RF24::write_payload(const void* buf, uint8_t data_len, uint8_t writeType)
@@ -67,14 +67,14 @@ uint8_t RF24::write_payload(const void* buf, uint8_t data_len, uint8_t writeType
 
 	//	debug_i("[Writing %u bytes %u blanks]", data_len, blank_len);
 
-	packet.prepare();
+	request.prepare();
 	outbuf[0] = writeType;
 	memcpy(&outbuf[1], buf, data_len);
 	memset(&outbuf[1 + data_len], 0, blank_len);
-	packet.out.set(outbuf, 1 + data_len + blank_len);
-	packet.in.set8(0);
-	spidev.execute(packet);
-	return packet.in.data8;
+	request.out.set(outbuf, 1 + data_len + blank_len);
+	request.in.set8(0);
+	execute(request);
+	return request.in.data8;
 }
 
 uint8_t RF24::read_payload(void* buf, uint8_t data_len)
@@ -84,13 +84,13 @@ uint8_t RF24::read_payload(void* buf, uint8_t data_len)
 
 	//	debug_i("[Reading %u bytes %u blanks]", data_len, blank_len);
 
-	packet.prepare();
-	packet.out.set8(R_RX_PAYLOAD);
+	request.prepare();
+	request.out.set8(R_RX_PAYLOAD);
 	memset(inbuf, 0, sizeof(inbuf));
-	packet.in.set(inbuf, 1 + data_len + blank_len);
-	spidev.execute(packet);
+	request.in.set(inbuf, 1 + data_len + blank_len);
+	execute(request);
 	memcpy(buf, &inbuf[1], data_len);
-	return packet.in.data8;
+	return request.in.data8;
 }
 
 uint8_t RF24::flush_rx()
@@ -105,11 +105,11 @@ uint8_t RF24::flush_tx()
 
 uint8_t RF24::spiTrans(uint8_t cmd)
 {
-	packet.prepare();
-	packet.out.set8(cmd);
-	packet.in.set8(0);
-	spidev.execute(packet);
-	return packet.in.data8;
+	request.prepare();
+	request.out.set8(cmd);
+	request.in.set8(0);
+	execute(request);
+	return request.in.data8;
 }
 
 uint8_t RF24::get_status()
@@ -161,7 +161,7 @@ void RF24::print_address_register(const char* name, uint8_t reg, uint8_t qty)
 
 void RF24::printDetails()
 {
-	m_printf(_F("SPI Speed\t = %u MHz\n"), spidev.getSpeed() / 1000000U);
+	m_printf(_F("SPI Speed\t = %u MHz\n"), getSpeed() / 1000000U);
 
 	print_status(get_status());
 
@@ -198,26 +198,29 @@ void RF24::printDetails()
 
 #endif // RF24_MINIMAL
 
-RF24::RF24(HSPI::Controller& spi, uint32_t spiSpeed, uint16_t cepin) : ce_pin(cepin)
+RF24::RF24(HSPI::Controller& spi, uint32_t spiSpeed, uint16_t cepin) : Device(spi), ce_pin(cepin)
 {
 	pipe0_reading_address[0] = 0;
 
-	spidev.begin(&spi);
-	spidev.setBitOrder(MSBFIRST);
-	spidev.setMode(HSPI::Mode0);
-	spidev.setSpeed(spiSpeed);
-	packet.duplex = true;
+	setBitOrder(MSBFIRST);
+	setClockMode(HSPI::ClockMode::mode0);
+	setIoMode(HSPI::IoMode::SPI);
+	setSpeed(spiSpeed);
 }
 
-bool RF24::begin()
+bool RF24::begin(HSPI::PinSet pinSet, uint8_t chipSelect)
 {
+	if(!Device::begin(pinSet, chipSelect)) {
+		return false;
+	}
+
 	// Initialize pins
 	if(ce_pin >= 0) {
 		pinMode(ce_pin, OUTPUT);
 		ce(LOW);
 	}
 
-	//	debug_i("spiSpeed = %u, clockReg = 0x%08x", spidev.getSpeed(), spidev.getClockReg());
+	//	debug_i("spiSpeed = %u, clockReg = 0x%08x", getSpeed(), getClockReg());
 
 	// Must allow the radio time to settle else configuration bits will not necessarily stick.
 	// This is actually only required following power up but some settling time also appears to
@@ -732,11 +735,11 @@ void RF24::closeReadingPipe(uint8_t pipe)
 
 void RF24::toggle_features()
 {
-	packet.prepare();
+	request.prepare();
 	outbuf[0] = ACTIVATE;
 	outbuf[1] = 0x73;
-	packet.out.set(outbuf, 2);
-	spidev.execute(packet);
+	request.out.set(outbuf, 2);
+	execute(request);
 }
 
 void RF24::enableDynamicPayloads()
@@ -811,13 +814,13 @@ void RF24::writeAckPayload(uint8_t pipe, const void* buf, uint8_t len)
 {
 	uint8_t data_len = std::min(len, uint8_t(32));
 
-	packet.prepare();
+	request.prepare();
 	outbuf[0] = W_ACK_PAYLOAD | (pipe & 0x07);
 	assert(len < sizeof(outbuf));
-	memcpy(&outbuf[1], buf, len);
-	packet.out.set(outbuf, 1 + len);
-	packet.in.clear();
-	spidev.execute(packet);
+	memcpy(&outbuf[1], buf, data_len);
+	request.out.set(outbuf, 1 + data_len);
+	request.in.clear();
+	execute(request);
 }
 
 bool RF24::isPVariant()

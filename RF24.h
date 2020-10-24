@@ -57,7 +57,7 @@ enum rf24_crclength_e {
  * Driver for nRF24L01(+) 2.4GHz Wireless Transceiver
  */
 
-class RF24
+class RF24 : public HSPI::Device
 {
 public:
 	static constexpr uint32_t SPI_SPEED{8000000U};
@@ -96,7 +96,12 @@ public:
      * Call this in setup(), before calling any other methods.
      * @code radio.begin() @endcode
      */
-	bool begin();
+	bool begin(HSPI::PinSet pinSet, uint8_t chipSelect);
+
+	HSPI::IoModes getSupportedIoModes() const override
+	{
+		return HSPI::IoMode::SPI;
+	}
 
 	/**
      * Checks if the chip is connected to the SPI bus
@@ -213,7 +218,7 @@ public:
      */
 	bool write(const void* buf, uint8_t len)
 	{
-		return write(buf, len, 0);
+		return write(buf, len, false);
 	}
 
 	/**
@@ -360,7 +365,7 @@ public:
     *
     * @param buf Pointer to the data to be sent
     * @param len Number of bytes to be sent
-    * @param multicast Request ACK (0), NOACK (1)
+    * @param multicast Request ACK (false), NOACK (true)
     */
 	bool write(const void* buf, uint8_t len, bool multicast);
 
@@ -643,7 +648,7 @@ public:
      */
 	bool isValid()
 	{
-		return ce_pin >= 0;
+		return ce_pin >= 0 && Device::isReady();
 	}
 
 	/**
@@ -1184,8 +1189,7 @@ private:
     */
 	uint32_t txDelay{0};
 
-	HSPI::Device spidev;
-	HSPI::Packet packet;
+	HSPI::Request request;
 	uint8_t outbuf[1 + FIFO_SIZE];		  ///< +1 byte for command
 	uint8_t inbuf[1 + FIFO_SIZE];		  ///< +1 byte for status
 	int8_t ce_pin{-1};					  ///< "Chip Enable" pin, activates the RX or TX role
