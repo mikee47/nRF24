@@ -57,7 +57,7 @@ enum rf24_crclength_e {
  * Driver for nRF24L01(+) 2.4GHz Wireless Transceiver
  */
 
-class RF24 : public HSPI::Device
+class Nrf24 : public HSPI::Device
 {
 public:
 	static constexpr uint32_t SPI_SPEED{8000000U};
@@ -88,7 +88,7 @@ public:
      * @param spiSpeed The SPI speed in Hz ie: 1000000 == 1Mhz
      * @param cepin The pin attached to Chip Enable on the RF module, -1 if tied high
      */
-	RF24(HSPI::Controller& spi, uint32_t spiSpeed = SPI_SPEED, uint16_t _cepin = -1);
+	Nrf24(HSPI::Controller& spi, uint32_t spiSpeed = SPI_SPEED, uint16_t _cepin = -1);
 
 	/**
      * Begin operation of the chip
