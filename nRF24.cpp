@@ -7,7 +7,7 @@
  */
 
 #include "nRF24L01.h"
-#include "RF24.h"
+#include "include/nRF24.h"
 #include <Digital.h>
 #include <BitManipulations.h>
 #include <Data/CStringArray.h>
